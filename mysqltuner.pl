@@ -34,11 +34,17 @@
 # Inspired by Matthew Montgomery's tuning-primer.sh script:
 # http://forge.mysql.com/projects/view.php?id=44
 #
+# Little modifications to suit my personal needs
+# Nikhil Mulley
+# https://github.com/mnikhil-git/MySQLTuner-perl
+#
 use strict;
 use warnings;
 use diagnostics;
 use File::Spec;
 use Getopt::Long;
+use Term::ReadPassword;
+use Linux::MemInfo;
 
 # Set up a few variables for use in the script
 my $tunerversion = "1.2.0";
@@ -214,8 +220,10 @@ sub os_setup {
 		}
 	} else {
 		if ($os =~ /Linux/) {
-			$physical_memory = `free -b | grep Mem | awk '{print \$2}'` or memerror;
-			$swap_memory = `free -b | grep Swap | awk '{print \$2}'` or memerror;
+                        my %host_mem_info;
+                        %host_mem_info = &get_mem_info; 
+			$physical_memory = $host_mem_info{'MemTotal'} ? $host_mem_info{MemTotal}*1024 : memerror;
+			$swap_memory     = $host_mem_info{'SwapTotal'} ? $host_mem_info{SwapTotal}*1024 : memerror;
 		} elsif ($os =~ /Darwin/) {
 			$physical_memory = `sysctl -n hw.memsize` or memerror;
 			$swap_memory = `sysctl -n vm.swapusage | awk '{print \$3}' | sed 's/\..*\$//'` or memerror;
@@ -249,10 +257,11 @@ my ($mysqllogin,$doremote,$remotestring);
 sub mysql_setup {
 	$doremote = 0;
 	$remotestring = '';
-	my $command = `which mysqladmin`;
-	chomp($command);
-	if (! -e $command) {
-		badprint "Unable to find mysqladmin in your \$PATH.  Is MySQL installed?\n";
+        my $mysql_port = 3306;
+	my $mysql_admin = `which mysqladmin`;
+	chomp($mysql_admin);
+	if (! -x $mysql_admin) {
+		badprint "Unable to find $mysql_admin in your \$PATH.  Is MySQL installed?\n";
 		exit;
 	}
 	# Are we being asked to connect via a socket?
@@ -262,7 +271,7 @@ sub mysql_setup {
 	# Are we being asked to connect to a remote server?
 	if ($opt{host} ne 0) {
 		chomp($opt{host});
-		$opt{port} = ($opt{port} eq 0)? 3306 : $opt{port} ;
+		$opt{port} = ($opt{port} eq 0)? $mysql_port : $opt{port} ;
 		# If we're doing a remote connection, but forcemem wasn't specified, we need to exit
 		if ($opt{'forcemem'} eq 0) {
 			badprint "The --forcemem option is required for remote connections\n";
@@ -275,7 +284,7 @@ sub mysql_setup {
 	# Did we already get a username and password passed on the command line?
 	if ($opt{user} ne 0 and $opt{pass} ne 0) {
 		$mysqllogin = "-u $opt{user} -p'$opt{pass}'".$remotestring;
-		my $loginstatus = `mysqladmin ping $mysqllogin 2>&1`;
+		my $loginstatus = `$mysql_admin ping $mysqllogin 2>&1`;
 		if ($loginstatus =~ /mysqld is alive/) {
 			goodprint "Logged in using credentials passed on the command line\n";
 			return 1;
@@ -284,18 +293,20 @@ sub mysql_setup {
 			exit 0;
 		}
 	}
-	if ( -r "/etc/psa/.psa.shadow" and $doremote == 0 ) {
+        my $psa_shadow_file = "/etc/psa/.psa.shadow";
+        my $deb_mysql_cnf   = "/etc/mysql/debian.cnf";
+	if ( -r $psa_shadow_file and $doremote == 0 ) {
 		# It's a Plesk box, use the available credentials
-		$mysqllogin = "-u admin -p`cat /etc/psa/.psa.shadow`";
-		my $loginstatus = `mysqladmin ping $mysqllogin 2>&1`;
+		$mysqllogin = "-u admin -p`cat $psa_shadow_file`";
+		my $loginstatus = `$mysql_admin ping $mysqllogin 2>&1`;
 		unless ($loginstatus =~ /mysqld is alive/) {
 			badprint "Attempted to use login credentials from Plesk, but they failed.\n";
 			exit 0;
 		}
-	} elsif ( -r "/etc/mysql/debian.cnf" and $doremote == 0 ){
+	} elsif ( -r $deb_mysql_cnf  and $doremote == 0 ){
 		# We have a debian maintenance account, use it
-		$mysqllogin = "--defaults-file=/etc/mysql/debian.cnf";
-		my $loginstatus = `mysqladmin $mysqllogin ping 2>&1`;
+		$mysqllogin = "--defaults-file=$deb_mysql_cnf";
+		my $loginstatus = `$mysql_admin $mysqllogin ping 2>&1`;
 		if ($loginstatus =~ /mysqld is alive/) {
 			goodprint "Logged in using credentials from debian maintenance account.\n";
 			return 1;
@@ -305,12 +316,12 @@ sub mysql_setup {
 		}
 	} else {
 		# It's not Plesk or debian, we should try a login
-		my $loginstatus = `mysqladmin $remotestring ping 2>&1`;
+		my $loginstatus = `$mysql_admin $remotestring ping 2>&1`;
 		if ($loginstatus =~ /mysqld is alive/) {
 			# Login went just fine
 			$mysqllogin = " $remotestring ";
 			# Did this go well because of a .my.cnf file or is there no password set?
-			my $userpath = `printenv HOME`;
+			my $userpath = $ENV{HOME};
 			if (length($userpath) > 0) {
 				chomp($userpath);
 			}
@@ -321,25 +332,20 @@ sub mysql_setup {
 		} else {
 			print STDERR "Please enter your MySQL administrative login: ";
 			my $name = <>;
-			print STDERR "Please enter your MySQL administrative password: ";
-			system("stty -echo >$devnull 2>&1");
-			my $password = <>;
-			system("stty echo >$devnull 2>&1");
-			chomp($password);
 			chomp($name);
+			my $password = read_password('Please enter your MySQL administrative password: ');
 			$mysqllogin = "-u $name";
 			if (length($password) > 0) {
 				$mysqllogin .= " -p'$password'";
 			}
 			$mysqllogin .= $remotestring;
-			my $loginstatus = `mysqladmin ping $mysqllogin 2>&1`;
+			my $loginstatus = `$mysql_admin ping $mysqllogin 2>&1`;
 			if ($loginstatus =~ /mysqld is alive/) {
 				print STDERR "\n";
 				if (! length($password)) {
 					# Did this go well because of a .my.cnf file or is there no password set?
-					my $userpath = `ls -d ~`;
-					chomp($userpath);
-					unless ( -e "$userpath/.my.cnf" ) {
+					my $userpath = $ENV{HOME};
+					unless ( -r "$userpath/.my.cnf" ) {
 						badprint "Successfully authenticated with no password - SECURITY RISK!\n";
 					}
 				}
