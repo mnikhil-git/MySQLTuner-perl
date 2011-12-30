@@ -1,0 +1,36 @@
+
+TODO:
+====
+Script: MySQL tuner script:
+------------------
+  - Build on existing RackerHacker's mysqltuner perl script. 
+  - Add on any extra
+
+1. Standardize the script in general
+2. Avoid using backticks, system wherever if possible.
+3. Initialise everything into variables including commands 
+4. Remove hard coding
+5. Provide additional tuning hooks as and when necessary. 
+     MySQLTuner is great in itself, it provides almost all the array of performance tuning parameters check
+     in general. I am just adding on top of it, according to my requirements or as I see it fit.
+
+Additional hooks:-
+
+1. check query_cache_type and query_cache_size
+    check if query_cache_type is enabled then check the cache size.
+    check individual query cache limit size
+
+2. sort buffer size
+    should be max connections * sort_buffer_size to be free in memory
+
+3. If isam tables or myisam is on
+    myisam_sort_buffer_size
+
+4. WARN innodb_flush_log_at_trx_commit-1: InnoDB is not
+   configured in strictly ACID mode. 
+
+5. log_warnings must be set greater than 1
+6. log_bin should be enabled for point-in-time recovery and replication.
+7. sync_bin_log 
+8. innodb commit trx variables, innodb performance related variables 
+9. Skip-networking if not needed, decide dynamic if there are not any inet/external connected hosts.
