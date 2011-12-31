@@ -147,18 +147,19 @@ sub initialize_variables {
 
 
 sub connect_db {
-  
-  my %mysql_conn_details = ();
-  $mysql_conn_details{'database'} => $mysql_default_db_login;
-  $mysql_conn_details{'user'}     => $mysql_default_user;
-  $mysql_conn_details{'password'} => $opt{'pass'};
+
+  my %mysql_conn_details = ( 
+                           'database' => $mysql_default_db_login,
+			   'user'     => $mysql_default_user,
+			   'password' => $opt{'pass'},
+                           );
 
   # use socket method if defined
-  if($mysql_use_port) {
-    $mysql_conn_details{'hostname'} => $opt{'host'};
-    $mysql_conn_details{'port'} => $mysql_default_port;
+  if(defined($mysql_use_port) && $mysql_use_port != 0) {
+    $mysql_conn_details{'hostname'} = $opt{'host'};
+    $mysql_conn_details{'port'} = $mysql_default_port;
   } else {
-    $mysql_conn_details{'unixsocket'} => $opt{'socket'};
+    $mysql_conn_details{'unixsocket'} = $opt{'socket'};
   }
   
   $mysql_handle = Net::MySQL->new(%mysql_conn_details);
