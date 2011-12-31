@@ -54,6 +54,12 @@ my %opt = (
 
 my $fix_tables = 0;
 my @mysql_dbs = ();
+my $mysql_handle = ();
+
+my $mysql_default_user = 'root';
+my $mysql_default_port = 3306;
+my $mysql_default_db_login = 'information_schema';
+my $mysql_use_port = 0;
 
 # Get options from command line
 GetOptions(\%opt,
@@ -63,7 +69,8 @@ GetOptions(\%opt,
                'user=s',
                'pass=s',
                'dblist=s@',
-               'db-all',
+#               'exclude_dblist=s@',
+               'dball',
                'list',
                'fix',
                'help',
@@ -72,6 +79,7 @@ GetOptions(\%opt,
 if (defined $opt{'help'} && $opt{'help'} == 1) { usage(); }
 
 sub usage {
+
   # usage of the command line with --help option
   print " ".
         "MySQL-Optimize-Tables - perl script version $script_version\n".
@@ -84,7 +92,8 @@ sub usage {
         "  --list List the fragmented tables. Default option for all databases\n".
         "  --fix  Fix the fragmented tables. Run Optimize table for the listed tables\n".
         "  --dblist  Comma seperated list of databases to check the list of their fragmented tables\n".
-        "  --db-all  All databases to check. Default. \n".
+        "  --exclude_dblist  Comma seperated list of databases to exclude from the check\n".
+        "  --dball  All databases to check. Default. \n".
         "  --output-file  Store output onto the file. \n".
         "\n";
         exit;
@@ -92,11 +101,6 @@ sub usage {
 
 
 sub initialize_variables {
-
-  my $mysql_default_user = 'root';
-  my $mysql_default_port = 3306;
-  my $mysql_default_db_login = 'information_schema';
-  my $mysql_use_port = 0;
 
   # if hostname is not specified use socket connection
   if (defined $opt{'host'} && $opt{'host'} ne 0) {
@@ -112,6 +116,8 @@ sub initialize_variables {
   if (defined $opt{'user'} && $opt{'user'} ne 0) {
     chomp($opt{'user'});
     $opt{'user'} = (defined($opt{'user'})) ? $mysql_default_port : $opt{'user'};
+
+    if (! defined $opt{'pass'} && $opt{'pass'} eq "" ) { usage(); }
   } 
 
   # default operation is to list the fragmented tables
@@ -129,7 +135,34 @@ sub initialize_variables {
 
   if (defined $opt{'dblist'} && $opt{'dblist'} ne 0) {
     @mysql_dbs = split(/,/, join(',', @{$opt{'dblist'}}));
+    $opt{'dball'} = 0;
+  } else {
+  
+  # default is to check for all the databases then.
+    @mysql_dbs = ();
+    $opt{'dball'} = 1;
   }
+
+}
+
+
+sub connect_db {
+  
+  my %mysql_conn_details = ();
+  $mysql_conn_details{'database'} => $mysql_default_db_login;
+  $mysql_conn_details{'user'}     => $mysql_default_user;
+  $mysql_conn_details{'password'} => $opt{'pass'};
+
+  # use socket method if defined
+  if($mysql_use_port) {
+    $mysql_conn_details{'hostname'} => $opt{'host'};
+    $mysql_conn_details{'port'} => $mysql_default_port;
+  } else {
+    $mysql_conn_details{'unixsocket'} => $opt{'socket'};
+  }
+  
+  $mysql_handle = Net::MySQL->new(%mysql_conn_details);
+   
 }
 
 # -----------------------------------------------------------------------------
@@ -138,7 +171,8 @@ sub initialize_variables {
 print "\n >> MySQL-Optimize-Tables  - Nikhil Mulley <mnikhil\@gmail.com>\n";
 print "\n >>   Run with --help for additional options\n";
 
-#initialize_variables;
+initialize_variables;
+connect_db;
 #mysql_setup;
 #check_fragmented_tables;
 
