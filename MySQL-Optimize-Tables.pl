@@ -43,23 +43,19 @@ my $script_version = '1.0';
 
 # set defaults
 my %opt = (
-            "host"    => 0,
+            "host"      => 0,
             "socket"    => 0,
-            "port"    => 0,
-            "user"    => 0,
-            "pass"    => 0,
-            "list"    => 0,
-            "fix"    => 0,
+            "port"      => 0,
+            "user"      => 0,
+            "pass"      => 0,
+            "list"      => 0,
+            "fix"       => 0,
+            "verbose"   => 0,
           );
 
-my $fix_tables = 0;
-my @mysql_dbs = ();
-my $mysql_handle = ();
-
-my $mysql_default_user = 'root';
-my $mysql_default_port = 3306;
-my $mysql_default_db_login = 'information_schema';
-my $mysql_use_port = 0;
+use vars qw ($fix_tables @mysql_dbs $mysql_handle $mysql_default_user 
+             $mysql_default_port $mysql_default_db_login $mysql_use_port
+             %db_fragmented_tables);
 
 # Get options from command line
 GetOptions(\%opt,
@@ -73,6 +69,7 @@ GetOptions(\%opt,
                'dball',
                'list',
                'fix',
+               'verbose',
                'help',
           );
 
@@ -94,13 +91,23 @@ sub usage {
         "  --dblist  Comma seperated list of databases to check the list of their fragmented tables\n".
         "  --exclude_dblist  Comma seperated list of databases to exclude from the check\n".
         "  --dball  All databases to check. Default. \n".
-        "  --output-file  Store output onto the file. \n".
+        "  --output-file  Store output onto the file. Default: $0.log \n".
         "\n";
         exit;
 }
 
 
 sub initialize_variables {
+
+  $fix_tables = 0;
+  @mysql_dbs = ();
+  $mysql_handle = ();
+
+  $mysql_default_user = 'root';
+  $mysql_default_port = 3306;
+  $mysql_default_db_login = 'information_schema';
+  $mysql_use_port = 0;
+  %db_fragmented_tables = ();
 
   # if hostname is not specified use socket connection
   if (defined $opt{'host'} && $opt{'host'} ne 0) {
@@ -149,9 +156,9 @@ sub initialize_variables {
 sub connect_db {
 
   my %mysql_conn_details = ( 
-                           'database' => $mysql_default_db_login,
-			   'user'     => $mysql_default_user,
-			   'password' => $opt{'pass'},
+                              'user'     => $mysql_default_user,
+                              'database' => $mysql_default_db_login,
+                              'password' => $opt{'pass'},
                            );
 
   # use socket method if defined
@@ -163,17 +170,74 @@ sub connect_db {
   }
   
   $mysql_handle = Net::MySQL->new(%mysql_conn_details);
+  print "INFO| Connected to MySQL server.  \n" if $opt{'verbose'};
    
+}
+
+
+sub prepare_query {
+  my $sql_query;
+  # query to fetch the list of fragmented tables across the databases from information_schema
+  $sql_query = 'SELECT TABLE_SCHEMA, TABLE_NAME FROM information_schema.TABLES where  DATA_FREE > 0 ';
+  if (! $opt{'dball'} && @mysql_dbs) {
+    my $dbcnt = 0;
+    $sql_query .= 'AND ( ';
+    while ($dbcnt <= $#mysql_dbs) {
+	    $sql_query .= "TABLE_SCHEMA <=> \"$mysql_dbs[$dbcnt]\" ";
+	    $sql_query .= ' OR ' if $dbcnt != $#mysql_dbs;
+	    $dbcnt++;
+    } 
+    $sql_query .= ') ';
+
+  } 
+  
+  $sql_query .= 'ORDER BY TABLE_SCHEMA ASC, TABLE_NAME ASC';
+
+  return($sql_query);
+
+}
+
+sub fetch_fragmented_tables {
+  my $sql_query = &prepare_query;
+  #print "INFO| SQL Query :$sql_query\n" if $opt{'verbose'};
+
+  $mysql_handle->query(qq{$sql_query});
+  if ($mysql_handle->has_selected_record) {
+    my $db_record_iter = $mysql_handle->create_record_iterator;
+    my $db_row;
+    while( $db_row = $db_record_iter->each ) {
+      push(@{$db_fragmented_tables{"$db_row->[0]"}}, $db_row->[1]);
+    }
+
+  }
+}
+
+sub display_fragmented_tables_summary {
+  if(defined (%db_fragmented_tables) ) {
+  print "Summary of fragmented tables on $opt{host} MySQL database\n";
+  print "=" x 75; print "\n";
+  
+  foreach my $db_schema (keys %db_fragmented_tables) {
+    printf("%-20s : %-3d\n", $db_schema, scalar(@{$db_fragmented_tables{$db_schema}}));
+  }
+  print "=" x 75; print "\n";
+  } else {
+    print "INFO| No Fragmented tables found in database(s) \n" if $opt{'verbose'};
+  }
+}
+
+sub fix_fragmented_tables {
+
 }
 
 # -----------------------------------------------------------------------------
 # BEGIN 'MAIN'
 # -----------------------------------------------------------------------------
-print "\n >> MySQL-Optimize-Tables  - Nikhil Mulley <mnikhil\@gmail.com>\n";
-print "\n >>   Run with --help for additional options\n";
+#print "\n >> MySQL-Optimize-Tables  - Author: Nikhil Mulley ";
+#print "\n >>   Run with --help for additional options\n";
 
 initialize_variables;
 connect_db;
-#mysql_setup;
-#check_fragmented_tables;
-
+fetch_fragmented_tables;
+display_fragmented_tables_summary;
+#fix_fragmented_tables if defined($opt{'fix'}) && $opt{'fix'};
