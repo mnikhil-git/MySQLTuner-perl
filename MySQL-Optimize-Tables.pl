@@ -213,7 +213,7 @@ sub fetch_fragmented_tables {
 }
 
 sub display_fragmented_tables_summary {
-  if(defined (%db_fragmented_tables) ) {
+  if(defined (%db_fragmented_tables)) {
   print "Summary of fragmented tables on $opt{host} MySQL database\n";
   print "=" x 75; print "\n";
   
